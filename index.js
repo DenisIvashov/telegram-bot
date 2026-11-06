@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Bot, InlineKeyboard } from "grammy";
+import http from 'http';
 
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwVICPyCR8MrC0916owVaDAuNWdjJWLF552mtyjx5ikGW-SqFeeXm9VDc6_q1Zb4gaY7g/exec';
 
@@ -65,6 +66,15 @@ bot.callbackQuery(/^service_/, (ctx) => {
 
   ctx.reply(`Вы выбрали: ${service.name}. Как вас зовут?`);
   ctx.answerCallbackQuery();
+});
+
+
+const port = process.env.PORT || 10000;
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Bot is alive');
+}).listen(port, () => {
+    console.log(`Health check on port ${port}`);
 });
 
 bot.start();
