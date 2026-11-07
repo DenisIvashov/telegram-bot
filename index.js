@@ -6,69 +6,130 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwVICPyCR8MrC0916owVa
 
 const token = process.env.BOT_TOKEN;
 const bot = new Bot(token);
-const keyboard = new InlineKeyboard()
-  .text("Услуга 1", "service_1")
-  .text("Услуга 2", "service_2")
-  .text("Услуга 3", "service_3");
-const services = [
-    {id: "service_1", name: "Услуга 1"},
-    {id: "service_2", name: "Услуга 2"},
-    {id: "service_3", name: "Услуга 3"}
-] 
-const userData = {} 
 
-async function sendToSheet(service, name, phone) {
+// Услуги
+const services = [
+    {id: "haircut", name: "Мужская стрижка"},
+    {id: "beard", name: "Стрижка бороды"},
+    {id: "combo", name: "Комплекс (стрижка + борода)"}
+];
+
+const userData = {}; // Временное хранилище данных пользователей
+
+// Функция отправки в Google Sheets
+async function sendToSheet(service, date, time, name, phone) {
   try {
     const res = await fetch(SHEET_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ service, name, phone }),
+      body: JSON.stringify({ service, date, time, name, phone }),
       redirect: "follow",
     });
     console.log("Статус ответа Google:", res.status);
-    const text = await res.text();
-    console.log("Ответ Google:", text);
   } catch (error) {
     console.error('Ошибка отправки в Google:', error.message);
   }
 }
 
-bot.command("start", (ctx) => ctx.reply("Привет!"));
-bot.command("menu", (ctx) => {
-  ctx.reply("Выберите услугу:", { reply_markup: keyboard });
+// 1. КОМАНДА СТАРТ
+bot.command("start", (ctx) => {
+    const keyboard = new InlineKeyboard().text("Записаться", "book");
+    ctx.reply("Привет! Это BarberShop Omsk. Нажмите кнопку, чтобы записаться.", { reply_markup: keyboard });
 });
 
+// 2. ВЫБОР УСЛУГИ (показываем кнопки услуг)
+bot.callbackQuery("book", (ctx) => {
+    const keyboard = new InlineKeyboard();
+    services.forEach(s => keyboard.text(s.name, `service_${s.id}`));
+    ctx.editMessageText("Выберите услугу:", { reply_markup: keyboard });
+    ctx.answerCallbackQuery();
+});
+
+// 3. УСЛУГА ВЫБРАНА (показываем кнопки дат)
+bot.callbackQuery(/^service_/, (ctx) => {
+    const serviceId = ctx.callbackQuery.data.replace('service_', '');
+    const service = services.find(s => s.id === serviceId);
+    const userId = ctx.from.id;
+
+    userData[userId] = { service: service.name };
+
+    const dateKeyboard = new InlineKeyboard()
+        .text("Сегодня", "date_Сегодня")
+        .text("Завтра", "date_Завтра")
+        .text("Послезавтра", "date_Послезавтра");
+
+    ctx.editMessageText(`Вы выбрали: ${service.name}. На какую дату?`, { reply_markup: dateKeyboard });
+    ctx.answerCallbackQuery();
+});
+
+// 4. ДАТА ВЫБРАНА (показываем кнопки времени)
+bot.callbackQuery(/^date_/, (ctx) => {
+    const date = ctx.callbackQuery.data.replace('date_', '');
+    const userId = ctx.from.id;
+    
+    userData[userId].date = date;
+
+    const timeKeyboard = new InlineKeyboard()
+        .text("10:00", "time_10:00")
+        .text("12:00", "time_12:00")
+        .text("15:00", "time_15:00")
+        .text("18:00", "time_18:00");
+
+    ctx.editMessageText(`Дата: ${date}. Выберите удобное время:`, { reply_markup: timeKeyboard });
+    ctx.answerCallbackQuery();
+});
+
+// 5. ВРЕМЯ ВЫБРАНО (просим имя)
+bot.callbackQuery(/^time_/, (ctx) => {
+    const time = ctx.callbackQuery.data.replace('time_', '');
+    const userId = ctx.from.id;
+    
+    userData[userId].time = time;
+
+    ctx.editMessageText(`Время: ${time}. Отлично! Как вас зовут?`);
+    ctx.answerCallbackQuery();
+});
+
+// 6. СБОР ИМЕНИ И ТЕЛЕФОНА
 bot.on("message:text", async (ctx) => {
     const userId = ctx.from.id;
     const text = ctx.message.text;
     const data = userData[userId];
 
-    if (data && data.service && !data.name) {
-        data.name = text;
-        ctx.reply("Отлично! Теперь ваш телефон:")
-    } else if (data && data.name && !data.phone) {
-        data.phone = text;
-        await sendToSheet(data.service, data.name, data.phone);
-        ctx.reply(`Готово! Заявка: ${data.service}, ${data.name}, ${data.phone}`);
-        delete userData[userId];
-    } else {
-        ctx.reply(text);
+    // Если пользователь не начинал запись — игнорируем или отвечаем
+    if (!data) {
+        return ctx.reply("Нажмите /start, чтобы начать запись.");
     }
 
+    // Ждём имя
+    if (data.service && data.date && data.time && !data.name) {
+        data.name = text;
+        ctx.reply("Отлично! Теперь ваш телефон:");
+    } 
+    // Ждём телефон
+    else if (data.name && !data.phone) {
+        data.phone = text;
+        
+        // Отправляем данные в таблицу
+        await sendToSheet(data.service, data.date, data.time, data.name, data.phone);
+        
+        // Итоговое сообщение
+        ctx.reply(
+            `✅ Вы записаны в BarberShop Omsk!\n\n` +
+            `📅 Дата: ${data.date}\n` +
+            `🕐 Время: ${data.time}\n` +
+            `💈 Услуга: ${data.service}\n` +
+            `👤 Имя: ${data.name}\n` +
+            `📞 Телефон: ${data.phone}\n\n` +
+            `Ждём вас!`
+        );
+        
+        // Очищаем данные
+        delete userData[userId];
+    }
 });
 
-bot.callbackQuery(/^service_/, (ctx) => {
-  const serviceId = ctx.callbackQuery.data;
-  const service = services.find(s => s.id === serviceId);
-  const userId = ctx.from.id;
-
-  userData[userId] = { service: service.name };
-
-  ctx.reply(`Вы выбрали: ${service.name}. Как вас зовут?`);
-  ctx.answerCallbackQuery();
-});
-
-
+// HTTP-сервер для Render
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => {
     res.writeHead(200);
