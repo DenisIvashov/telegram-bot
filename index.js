@@ -138,4 +138,12 @@ http.createServer((req, res) => {
     console.log(`Health check on port ${port}`);
 });
 
+bot.command("clear", async (ctx) => {
+    // Удаляем сообщение пользователя с командой /clear
+    await ctx.deleteMessage();
+    
+    // Отправляем новое сообщение
+    await ctx.reply("Чат очищен! Нажмите /start, чтобы начать новую запись.");
+});
+
 bot.start();
