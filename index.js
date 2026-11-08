@@ -134,9 +134,9 @@ bot.on("message:text", async (ctx) => {
     else if (data.name && !data.phone) {
       // Простая проверка: минимум 10 цифр
       const cleanedPhone = text.replace(/\D/g, ""); // Убираем всё, кроме цифр
-      if (cleanedPhone.length < 10) {
+      if (cleanedPhone.length < 11) {
         return ctx.reply(
-          "Пожалуйста, введите корректный номер телефона (минимум 10 цифр):",
+          "Пожалуйста, введите корректный номер телефона (минимум 11 цифр):",
         );
       }
       let normalized = text.replace(/\D/g, "");
