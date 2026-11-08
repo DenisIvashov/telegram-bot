@@ -2,7 +2,7 @@ import "dotenv/config";
 import { Bot, InlineKeyboard } from "grammy";
 import http from 'http';
 
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyz3_FB42PMZ6TP3e80ePQb80pWrBqFxTvSubOjJgvvi4JpViG6jsjzOezfpeY2frT_5Q/exec';
+const SHEET_URL = process.env.SHEET_URL;
 
 const token = process.env.BOT_TOKEN;
 const bot = new Bot(token);
