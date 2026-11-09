@@ -17,6 +17,7 @@ const services = [
 const userData = {}; // Временное хранилище данных пользователей
 
 // Функция отправки в Google Sheets
+// ИСПРАВЛЕНО: теперь функция возвращает true/false, чтобы знать, дошла ли заявка
 async function sendToSheet(service, date, time, name, phone) {
   try {
     const res = await fetch(SHEET_URL, {
@@ -26,8 +27,10 @@ async function sendToSheet(service, date, time, name, phone) {
       redirect: "follow",
     });
     console.log("Статус ответа Google:", res.status);
+    return res.status === 200 || res.status === 302; // успех — если сервер ответил OK
   } catch (error) {
     console.error('Ошибка отправки в Google:', error.message);
+    return false; // не удалось отправить
   }
 }
 
@@ -69,14 +72,16 @@ bot.callbackQuery(/^date_/, (ctx) => {
 
   let realDate;
   const now = new Date();
+  // ИСПРАВЛЕНО: добавлена timeZone: "Asia/Omsk", иначе на сервере UTC
+  // и «Сегодня» после 00:00 по Омску превращается во вчерашнюю дату
   if (date === "Сегодня") {
-    realDate = now.toLocaleDateString("ru-RU");
+    realDate = now.toLocaleDateString("ru-RU", { timeZone: "Asia/Omsk" });
   } else if (date === "Завтра") {
     now.setDate(now.getDate() + 1);
-    realDate = now.toLocaleDateString("ru-RU");
+    realDate = now.toLocaleDateString("ru-RU", { timeZone: "Asia/Omsk" });
   } else if (date === "Послезавтра") {
     now.setDate(now.getDate() + 2);
-    realDate = now.toLocaleDateString("ru-RU");
+    realDate = now.toLocaleDateString("ru-RU", { timeZone: "Asia/Omsk" });
   }
 
   userData[userId].date = realDate; // Сохраняем реальную дату
@@ -107,10 +112,7 @@ bot.callbackQuery(/^time_/, (ctx) => {
 bot.command("clear", async (ctx) => {
     const userId = ctx.from.id;
     delete userData[userId];
-    // Удаляем сообщение пользователя с командой /clear
     await ctx.deleteMessage();
-    
-    // Отправляем новое сообщение
     await ctx.reply("Чат очищен! Нажмите /start, чтобы начать новую запись.");
 });
 
@@ -120,7 +122,6 @@ bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     const data = userData[userId];
 
-    // Если пользователь не начинал запись — игнорируем или отвечаем
     if (!data) {
         return ctx.reply("Нажмите /start, чтобы начать запись.");
     }
@@ -132,8 +133,7 @@ bot.on("message:text", async (ctx) => {
     }
     // Ждём телефон
     else if (data.name && !data.phone) {
-      // Простая проверка: минимум 10 цифр
-      const cleanedPhone = text.replace(/\D/g, ""); // Убираем всё, кроме цифр
+      const cleanedPhone = text.replace(/\D/g, "");
       if (cleanedPhone.length < 11) {
         return ctx.reply(
           "Пожалуйста, введите корректный номер телефона (минимум 11 цифр):",
@@ -149,8 +149,9 @@ bot.on("message:text", async (ctx) => {
       }
       data.phone = normalized;
 
-      // Отправляем данные в таблицу
-      await sendToSheet(
+      // ИСПРАВЛЕНО: сначала отправляем в таблицу и проверяем результат,
+      // и только потом говорим клиенту о результате — честно
+      const ok = await sendToSheet(
         data.service,
         data.date,
         data.time,
@@ -158,18 +159,25 @@ bot.on("message:text", async (ctx) => {
         data.phone,
       );
 
-      // Итоговое сообщение
-      ctx.reply(
-        `✅ Вы записаны в BarberShop Omsk!\n\n` +
-          `📅 Дата: ${data.date}\n` +
-          `🕐 Время: ${data.time}\n` +
-          `💈 Услуга: ${data.service}\n` +
-          `👤 Имя: ${data.name}\n` +
-          `📞 Телефон: ${data.phone}\n\n` +
-          `Ждём вас!`,
-      );
+      if (ok) {
+        ctx.reply(
+          `✅ Заявка отправлена!\n\n` +
+            `📅 Дата: ${data.date}\n` +
+            `🕐 Время: ${data.time}\n` +
+            `💈 Услуга: ${data.service}\n` +
+            `👤 Имя: ${data.name}\n` +
+            `📞 Телефон: ${data.phone}\n\n` +
+            `Мы подтвердим запись по телефону. Ждём вас!`,
+        );
+      } else {
+        // Таблица не приняла — не обманываем клиента, даём запасной канал
+        ctx.reply(
+          `⚠️ Не получилось отправить заявку автоматически.\n` +
+            `Позвоните нам или напишите — запишем вас вручную.`,
+        );
+      }
 
-      // Очищаем данные
+      // Очищаем данные (в обоих случаях — клиент может начать заново)
       delete userData[userId];
     }
 });
@@ -182,7 +190,5 @@ http.createServer((req, res) => {
 }).listen(port, () => {
     console.log(`Health check on port ${port}`);
 });
-
-
 
 bot.start();
